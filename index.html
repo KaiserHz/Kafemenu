@@ -55,14 +55,18 @@ input,select,textarea{width:100%;background:var(--card);border:1px solid var(--l
 input[type=color]{height:42px;padding:3px;min-width:90px}
 .btn,.nav a.on{color:var(--bg)}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
+.qrt{text-align:center}.qw{background:#fff;padding:10px;border-radius:10px;margin-bottom:6px}.qw svg{width:100%;height:auto;display:block}
+@media print{body *{visibility:hidden}.qrsheet,.qrsheet *{visibility:visible}.qrsheet{position:absolute;left:0;top:0;width:100%;background:#fff;color:#000;border:0}.noprint{display:none!important}.qrt b{color:#000}}
 </style></head><body>
 <nav class="nav" id="nav"></nav>
 <div id="bgl"></div>
 <div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script type="module">
 import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {getAuth,GoogleAuthProvider,signInWithPopup,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import {getFirestore,doc,collection,onSnapshot,setDoc,addDoc,updateDoc,deleteDoc,getDoc,writeBatch,query,orderBy,limit,serverTimestamp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import {getFirestore,doc,collection,onSnapshot,setDoc,addDoc,updateDoc,deleteDoc,getDoc,writeBatch,query,orderBy,limit,serverTimestamp,where,getDocs,Timestamp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 const K="qrmenu_demo_v1";
 const seed=()=>({s:{title:"Maison Şeker",desc:"El yapımı tatlılar, özenle demlenmiş kahveler ve serinleten içecekler.",wifi:"Maison2026",self:true,n:100},
 cats:[{id:"c1",name:"Sıcak İçecekler"},{id:"c2",name:"Soğuk İçecekler"},{id:"c3",name:"Tatlılar"}],
@@ -84,18 +88,37 @@ onSnapshot(doc(db,"settings","main"),d=>{D.s={...DEF,...(d.data()||{})};redraw()
 onSnapshot(query(collection(db,"categories"),orderBy("order")),q=>{D.cats=q.docs.map(d=>({id:d.id,...d.data()}));redraw()},()=>{});
 onSnapshot(collection(db,"items"),q=>{D.items=q.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.order||0)-(b.order||0));redraw()},()=>{});
 let unsubO=null,unsubT=null,first=true;
-const beep=()=>{try{const a=new AudioContext(),o=a.createOscillator();o.connect(a.destination);o.frequency.value=880;o.start();o.stop(a.currentTime+.25)}catch(e){}};
+let AC;const unlock=()=>{try{AC=AC||new AudioContext();AC.resume()}catch(e){}};document.addEventListener("click",unlock);document.addEventListener("touchstart",unlock);
+const beep=()=>{try{unlock();const n=AC.currentTime;[[784,0],[1047,.3]].forEach(([f,d])=>{const o=AC.createOscillator(),g=AC.createGain();o.type="sine";o.frequency.value=f;g.gain.setValueAtTime(0.0001,n+d);g.gain.linearRampToValueAtTime(.4,n+d+.02);g.gain.exponentialRampToValueAtTime(.001,n+d+1);o.connect(g);g.connect(AC.destination);o.start(n+d);o.stop(n+d+1.05)});navigator.vibrate&&navigator.vibrate(200)}catch(e){}};
+const dayStart=()=>{const d=new Date();d.setHours(0,0,0,0);return d};
+const mapO=d=>({id:d.id,...d.data(),t:d.data().t?.toMillis?.()||Date.now()});
 function watchOrders(){unsubO&&unsubO();unsubO=null;first=true;
- if(staff)unsubO=onSnapshot(query(collection(db,"orders"),orderBy("t","desc"),limit(150)),q=>{D.orders=q.docs.map(d=>({id:d.id,...d.data(),t:d.data().t?.toMillis?.()||Date.now()}));if(!first&&q.docChanges().some(c=>c.type=="added"))beep();first=false;draw()},()=>{});
- else if(my)unsubO=onSnapshot(doc(db,"orders",my),d=>{D.orders=d.exists()?[{id:d.id,...d.data()}]:[];redraw()},()=>{})}
+ if(staff)unsubO=onSnapshot(query(collection(db,"orders"),where("t",">=",Timestamp.fromMillis(dayStart().getTime()-6*36e5)),orderBy("t","desc"),limit(1000)),q=>{D.orders=q.docs.map(mapO);if(!first&&q.docChanges().some(c=>c.type=="added"))beep();first=false;draw()},()=>{});
+ else if(my)unsubO=onSnapshot(doc(db,"orders",my),d=>{D.orders=d.exists()?[mapO(d)]:[];redraw()},()=>{})}
 function watchTables(){unsubT&&unsubT();unsubT=null;if(admin)unsubT=onSnapshot(collection(db,"tables"),q=>{D.tables=q.docs.map(d=>({id:d.id,...d.data()}));redraw()},()=>{})}
 onAuthStateChanged(auth,async u=>{staff=admin=false;D.me=u;
  if(u&&u.emailVerified){const em=(u.email||"").toLowerCase();try{admin=(await getDoc(doc(db,"admins",em))).exists();staff=admin||(await getDoc(doc(db,"staff",em))).exists()}catch(e){}}
- watchOrders();watchTables();draw()});
+ watchOrders();watchTables();if(admin)loadRep();draw()});
 const shrink=f=>new Promise((res,rej)=>{const im=new Image(),u=URL.createObjectURL(f);im.onload=()=>{const k=Math.min(1,520/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);res(c.toDataURL("image/jpeg",.72))};im.onerror=rej;im.src=u});
 async function seedDb(){const x=seed(),b=writeBatch(db);delete x.s.n;b.set(doc(db,"settings","main"),x.s);x.cats.forEach((c,i)=>b.set(doc(db,"categories",c.id),{name:c.name,order:i}));x.items.forEach((it,k)=>{const{id,...r}=it;b.set(doc(db,"items",id),{...r,sold:false,order:k})});await b.commit()}
-async function makeTables(){const n=Math.min(200,Math.max(1,+$("#tc").value||0)),b=writeBatch(db);for(let i=1;i<=n;i++){if(!D.tables.some(t=>t.id==String(i)))b.set(doc(db,"tables",String(i)),{key:crypto.randomUUID().replace(/-/g,"").slice(0,12)})}await b.commit()}
-const tablesCard=()=>`<div class="card"><h3>Masa QR bağlantıları</h3><p class="muted">Her masanın kendine özel bağlantısı var. Bağlantıyı QR koda çevirip masaya yerleştirin.</p><div style="display:flex;gap:8px"><input id="tc" type="number" min="1" max="200" value="${D.tables.length||10}" aria-label="Masa sayısı"><button class="btn" data-mk>Masaları oluştur</button></div>${[...D.tables].sort((a,b)=>a.id-b.id).map(t=>`<div class="row"><b>${esc(t.id)}</b><input readonly value="${esc(base+"?masa="+t.id+"&k="+t.key)}"></div>`).join("")}</div>`;
+const rk=()=>crypto.randomUUID().replace(/-/g,"").slice(0,12);
+async function makeTables(){const n=Math.min(200,Math.max(1,+$("#tc").value||0)),b=writeBatch(db);for(let i=1;i<=n;i++)if(!D.tables.some(t=>t.id==String(i)))b.set(doc(db,"tables",String(i)),{key:rk()});await b.commit()}
+async function addTable(){const n=Math.max(0,...D.tables.map(t=>+t.id||0))+1;await setDoc(doc(db,"tables",String(n)),{key:rk()})}
+function clearMine(){my=null;try{sessionStorage.removeItem("my")}catch(e){}if(!staff)D.orders=[];watchOrders()}
+function lineList(o){return(o.lines||[]).slice(0,40).map(l=>{const i=D.items.find(x=>x.id==l.id);return{n:i?i.n:"Silinmiş ürün",q:Math.min(99,Math.max(1,Math.floor(+l.q)||1)),p:i?eff(i):0}})}
+const ototal=o=>lineList(o).reduce((x,l)=>x+l.q*l.p,0);
+const who=o=>[o.name&&esc(o.name),o.table&&"Masa "+esc(o.table)].filter(Boolean).join(" · ");
+const today=()=>new Date().toLocaleDateString("sv-SE");
+async function loadRep(){const v=$("#rd")?.value||D.rd||today();D.rd=v;const a=new Date(v+"T00:00:00"),b=new Date(a.getTime()+864e5);
+ try{const q=await getDocs(query(collection(db,"orders"),where("t",">=",Timestamp.fromDate(a)),where("t","<",Timestamp.fromDate(b)),orderBy("t"),limit(1000)));D.rep=q.docs.map(mapO)}catch(e){D.rep=[]}draw()}
+const repCard=()=>{const R=D.rep||[],dn=R.filter(o=>o.st=="done"),ip=R.filter(o=>o.st=="new"||o.st=="preparing").length,cx=R.filter(o=>o.st=="cancelled").length,ciro=dn.reduce((a,o)=>a+(o.total??ototal(o)),0),cnt={};
+ dn.forEach(o=>(o.lines||[]).forEach(l=>{cnt[l.id]=(cnt[l.id]||0)+Math.min(99,Math.max(1,Math.floor(+l.q)||1))}));
+ const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id,q])=>`<div class="row"><span>${esc(D.items.find(i=>i.id==id)?.n||"Silinmiş ürün")}</span><b>${q} adet</b></div>`).join("");
+ return `<div class="card"><h3>Günlük ciro ve rapor</h3><div style="display:flex;gap:8px"><input type="date" id="rd" data-rd value="${esc(D.rd||today())}"><button class="btn alt" data-rep>Yenile</button></div><div class="big" style="margin-top:8px">${tl(ciro)}</div><div class="muted">${dn.length} tamamlanan · ${ip} devam eden · ${cx} iptal${dn.length?` · ortalama sepet ${tl(Math.round(ciro/dn.length))}`:""}</div>${top?`<h3 style="margin-top:12px;font-size:20px">En çok satanlar</h3>${top}`:""}</div>`};
+const qrSvg=u=>{const q=qrcode(0,"M");q.addData(u);q.make();const v=q.createSvgTag(4,0),m=v.match(/width="(\d+)"/);return m?v.replace("<svg ",`<svg viewBox="0 0 ${m[1]} ${m[1]}" `):v};
+const qrTile=(label,u)=>`<div class="qrt"><div class="qw">${qrSvg(u)}</div><b>${esc(label)}</b></div>`;
+const tablesCard=()=>`<div class="card"><h3>Masalar ve QR kodları</h3><p class="muted">Masa sayısını yazıp oluşturun, sonradan "Masa ekle" ile artırabilirsiniz. Her masanın QR kodu kendine özeldir ve otomatik oluşur.</p><div style="display:flex;gap:8px"><input id="tc" type="number" min="1" max="200" value="${D.tables.length||10}" aria-label="Masa sayısı"><button class="btn" data-mk>Masaları oluştur</button><button class="btn alt" data-at>+ Masa ekle</button></div><div style="margin-top:10px"><button class="btn alt" data-print>QR kodlarını yazdır</button></div></div><div class="card qrsheet"><h3 class="noprint" style="margin-bottom:8px">QR kodları</h3><div class="qrgrid"><div>${qrTile("Genel menü",base)}</div>${[...D.tables].sort((a,b)=>a.id-b.id).map(t=>`<div>${qrTile("Masa "+t.id,base+"?masa="+t.id+"&k="+t.key)}<button class="btn bad noprint" style="width:100%;margin-top:6px" data-dt="${esc(t.id)}">Masayı sil</button></div>`).join("")}</div></div>`;
+setInterval(()=>{const e=document.getElementById("cd");if(!e)return;const o=D.orders.find(x=>x.id==my),l=o?60-(Date.now()-o.t)/1000:0;if(l<=0)draw();else e.textContent=Math.ceil(l)},1000);
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const tl=n=>"₺"+Number(n).toLocaleString("tr-TR");
@@ -132,23 +155,24 @@ const count=()=>Object.values(cart).reduce((a,b)=>a+b,0);
 
 function menu(){
  const s=D.s;tab=tab||D.cats[0]?.id;
- let h=`<div class="wrap"><div class="hero"><h1>${esc(s.title)}</h1><p>${esc(s.desc)}</p>${s.msg?`<p style="color:var(--gold);font-family:'Cormorant Garamond',Georgia,serif;font-size:22px">${esc(s.msg)}</p>`:""}${camp()}<br><div class="wifi">Wi-Fi şifresi: <b>${esc(s.wifi)}</b></div><div class="muted" style="margin-top:10px">${s.self?"Self servis · siparişiniz isminizle çağrılır":"Masa servisi · siparişiniz masanıza getirilir"}</div></div>`;
+ let h=`<div class="wrap">${my?mine():""}<div class="hero"><h1>${esc(s.title)}</h1><p>${esc(s.desc)}</p>${s.msg?`<p style="color:var(--gold);font-family:'Cormorant Garamond',Georgia,serif;font-size:22px">${esc(s.msg)}</p>`:""}${camp()}<br><div class="wifi">Wi-Fi şifresi: <b>${esc(s.wifi)}</b></div><div class="muted" style="margin-top:10px">${s.self?"Self servis · siparişiniz isminizle çağrılır":"Masa servisi · siparişiniz masanıza getirilir"}</div></div>`;
  h+=`<div class="tabs">${D.cats.map(c=>`<button class="${tab==c.id?"on":""}" data-tab="${c.id}">${esc(c.name)}</button>`).join("")}</div>`;
  D.cats.forEach(c=>{const its=D.items.filter(i=>i.c==c.id);if(!its.length)return;
   h+=`<h2 class="cat" id="cat-${c.id}">${esc(c.name)}</h2>`;
   its.forEach(i=>{const q=cart[i.id]||0;
    h+=`<div class="item ${i.sold?"sold":""}">${img(i)}<div class="t"><h3>${esc(i.n)}</h3><div class="p">${eff(i)<i.p?`<s class="muted">${tl(i.p)}</s> `:""}${tl(eff(i))}</div></div>${i.sold?`<span class="badge">Tükendi</span>`:q?`<div class="qty"><button data-m="${i.id}" aria-label="Azalt">−</button><b>${q}</b><button data-a="${i.id}" aria-label="Artır">+</button></div>`:`<button class="btn" data-a="${i.id}">Ekle</button>`}</div>`})});
- if(my)h+=mine();
+ 
  h+=`<div style="height:60vh"></div></div>`;
  if(count())h+=`<div class="bar"><div><b>${count()} ürün</b><div class="gold" style="color:var(--gold)">${tl(total())}</div></div><button class="btn" data-go="cart">Siparişi gözden geçir</button></div>`;
  return h}
 function mine(){const o=D.orders.find(o=>o.id==my);if(!o)return"";
- const st={new:"Siparişiniz alındı",done:D.s.self?"Siparişiniz hazır! İsminiz çağrılıyor":"Siparişiniz masanıza getiriliyor"}[o.st];
- return `<div class="card" style="border-color:var(--gold);margin-top:24px"><div class="muted">Sipariş #${o.no}</div><div class="big">${st}</div>${o.name?`<div>${esc(o.name)}</div>`:`<div>Masa ${o.table}</div>`}</div>`}
+ const st={new:"Siparişiniz alındı",preparing:"Siparişiniz hazırlanıyor",done:D.s.self?"Siparişiniz hazır! İsminiz çağrılıyor":"Siparişiniz masanıza getiriliyor",cancelled:"Siparişiniz iptal edildi"}[o.st]||"";
+ const left=60-(Date.now()-o.t)/1000,can=o.st=="new"&&left>0;
+ return `<div class="card" style="border-color:var(--gold)"><div class="muted">Sipariş #${esc(o.no)}${who(o)?" · "+who(o):""}</div><div class="big">${st}</div>${lineList(o).map(l=>`<div class="row" style="padding:2px 0"><span>${l.q} × ${esc(l.n)}</span><span>${tl(l.q*l.p)}</span></div>`).join("")}<div class="row" style="border-top:1px solid var(--line)"><b>Toplam</b><b>${tl(ototal(o))}</b></div>${can?`<p class="muted">Yanlış sipariş mi? İptal veya değiştirme için <b id="cd">${Math.ceil(left)}</b> saniyen var.</p><div style="display:flex;gap:10px"><button class="btn bad" data-cancel>İptal et</button><button class="btn alt" data-edit>Değiştir</button></div>`:(o.st=="done"||o.st=="cancelled"?`<button class="btn alt" data-clear>Yeni sipariş ver</button>`:"")}</div>`}
 function cartSheet(){
  const s=D.s;let rows=Object.entries(cart).map(([id,q])=>{const i=D.items.find(x=>x.id==id);return i?`<div class="row"><span>${q} × ${esc(i.n)}</span><b>${tl(q*eff(i))}</b></div>`:""}).join("");
  return `<div class="sheet" data-close><div><h2 style="font-size:30px">Siparişiniz</h2>${rows}<div class="row" style="border-top:1px solid var(--line);margin-top:6px"><span>Toplam</span><b class="big" style="font-size:26px">${tl(total())}</b></div>
- ${s.self?`<label for="nm">İsminiz (siparişiniz hazır olunca bu isimle çağrılır)</label><input id="nm" maxlength="30" value="${esc(nm)}" autocomplete="given-name">`:`<div class="card">Masanız: <b>${esc(MASA||"bilinmiyor")}</b></div>`}
+ ${s.self?`${MASA?`<div class="card">Masanız: <b>${esc(MASA)}</b></div>`:""}<label for="nm">İsminiz (siparişiniz hazır olunca bu isimle çağrılır)</label><input id="nm" maxlength="30" value="${esc(nm)}" autocomplete="given-name">`:`<div class="card">Masanız: <b>${esc(MASA||"bilinmiyor")}</b></div>`}
  <label for="nt">Sipariş notu (istemediğiniz malzeme, alerji vb.)</label><textarea id="nt" rows="3" maxlength="300" placeholder="Örn: fıstıksız olsun">${esc(note)}</textarea>
  <div id="err" style="color:var(--bad);min-height:22px;margin-top:6px"></div>
  <div style="display:flex;gap:10px"><button class="btn alt" data-x>Geri dön</button><button class="btn" style="flex:1" data-send>Siparişi gönder</button></div></div></div>`}
@@ -158,24 +182,26 @@ async function send(){
  if(!s.self&&!MASA)return er("Masa bilgisi yok. Lütfen masanızdaki QR kodu okutun.");
  const lines=Object.entries(cart).filter(([id])=>{const i=D.items.find(x=>x.id==id);return i&&!i.sold}).map(([id,q])=>({id,q}));
  if(!lines.length)return er("Sepetiniz boş.");
- try{const r=await addDoc(collection(db,"orders"),{no:Math.floor(1000+Math.random()*9000),name:s.self?nm:"",table:s.self?"":MASA,k:s.self?"":KEY,note,lines,st:"new",t:serverTimestamp()});
+ try{const r=await addDoc(collection(db,"orders"),{no:Math.floor(1000+Math.random()*9000),name:s.self?nm:"",table:MASA,k:MASA?KEY:"",note,lines,st:"new",t:serverTimestamp()});
   my=r.id;try{sessionStorage.setItem("my",JSON.stringify(my))}catch(e){}
-  cart={};note="";sheet=null;watchOrders();draw()}catch(e){er("Sipariş gönderilemedi. Lütfen tekrar deneyin veya kasaya haber verin.")}}
+  cart={};note="";sheet=null;watchOrders();draw();scrollTo({top:0,behavior:"smooth"})}catch(e){er("Sipariş gönderilemedi. Lütfen tekrar deneyin veya kasaya haber verin.")}}
 
 function kasa(){
  if(!staff)return login("Kasa");
- const nw=D.orders.filter(o=>o.st=="new").reverse(),dn=D.orders.filter(o=>o.st=="done").slice(0,8);
- const card=(o,a)=>{const L=(o.lines||[]).slice(0,40).map(l=>{const i=D.items.find(x=>x.id==l.id);return{n:i?i.n:"Silinmiş ürün",q:Math.min(99,Math.max(1,Math.floor(+l.q)||1)),p:i?eff(i):0}}),T=L.reduce((x,l)=>x+l.q*l.p,0);return `<div class="card"><div class="row"><b>#${esc(o.no)} · ${o.name?esc(o.name):"Masa "+esc(o.table)}</b><span class="muted">${new Date(o.t||Date.now()).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})}</span></div>${L.map(l=>`<div class="row" style="padding:2px 0"><span>${l.q} × ${esc(l.n)}</span></div>`).join("")}${o.note?`<div class="note">Not: ${esc(o.note)}</div>`:""}<div class="row"><b>${tl(T)}</b>${a?`<button class="btn" data-done="${o.id}">${D.s.self?"Hazır · ismi çağır":"Tamamla · masaya götür"}</button>`:`<span class="badge">Tamamlandı</span>`}</div></div>`};
+ const t0=dayStart().getTime(),td=D.orders.filter(o=>o.t>=t0&&o.st=="done"),ciro=td.reduce((a,o)=>a+(o.total??ototal(o)),0);
+ const by=x=>D.orders.filter(o=>o.st==x),nw=by("new").reverse(),pr=by("preparing").reverse(),dn=by("done").slice(0,8);
+ const btn=o=>o.st=="new"?`<button class="btn" data-act="${o.id}|preparing">Hazırlamaya başla</button>`:`<button class="btn" data-act="${o.id}|done">${D.s.self?"Hazır · ismi çağır":"Tamamla · masaya götür"}</button>`;
+ const card=(o,a)=>`<div class="card"><div class="row"><b>#${esc(o.no)} · ${who(o)||"—"}</b><span class="muted">${new Date(o.t).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"})}</span></div>${lineList(o).map(l=>`<div class="row" style="padding:2px 0"><span>${l.q} × ${esc(l.n)}</span></div>`).join("")}${o.note?`<div class="note">Not: ${esc(o.note)}</div>`:""}<div class="row"><b>${tl(o.total??ototal(o))}</b>${a?`<span style="display:flex;gap:6px"><button class="btn bad" data-act="${o.id}|cancelled">İptal</button>${btn(o)}</span>`:`<span class="badge">Tamamlandı</span>`}</div></div>`;
  return `<div class="wrap"><div class="stat"><h2 style="font-size:34px">Kasa</h2><span class="badge">${D.s.self?"Self servis modu":"Masa servisi modu"}</span><button class="btn alt" style="margin-left:auto" data-out>Çıkış</button></div>
- <div class="grid c3"><div style="grid-column:span 2"><h3>Bekleyen siparişler (${nw.length})</h3>${nw.map(o=>card(o,1)).join("")||`<p class="muted">Yeni sipariş bekleniyor.</p>`}</div><div><h3>Son tamamlananlar</h3>${dn.map(o=>card(o,0)).join("")||`<p class="muted">Henüz yok.</p>`}</div></div></div>`}
-
+ <div class="card"><div class="muted">Bugünün cirosu</div><div class="big">${tl(ciro)}</div><div class="muted">${td.length} tamamlanan sipariş</div></div>
+ <div class="grid c3"><div style="grid-column:span 2"><h3>Yeni siparişler (${nw.length})</h3>${nw.map(o=>card(o,1)).join("")||`<p class="muted">Yeni sipariş bekleniyor.</p>`}<h3>Hazırlanıyor (${pr.length})</h3>${pr.map(o=>card(o,1)).join("")||`<p class="muted">Hazırlanan sipariş yok.</p>`}</div><div><h3>Son tamamlananlar</h3>${dn.map(o=>card(o,0)).join("")||`<p class="muted">Henüz yok.</p>`}</div></div></div>`}
 function yon(){
  if(!admin)return login("Yönetim");
  const s=D.s;
  let h=`<div class="wrap"><div class="stat"><h2 style="font-size:34px">Yönetim</h2><button class="btn alt" style="margin-left:auto" data-out>Çıkış</button></div>
  <div class="card"><h3>Site bilgileri</h3><label>Restoran adı</label><input data-s="title" value="${esc(s.title)}"><label>Açıklama</label><textarea rows="2" data-s="desc">${esc(s.desc)}</textarea><label>Wi-Fi şifresi</label><input data-s="wifi" value="${esc(s.wifi)}">
  <label>Çalışma modu</label><select data-s="self"><option value="1" ${s.self?"selected":""}>Self servis (müşteri ismi girer)</option><option value="0" ${!s.self?"selected":""}>Masa servisi (QR masaya özel)</option></select></div>
- ${D.items.length?"":`<div class="card"><button class="btn" data-seed>Örnek menüyü yükle</button><p class="muted">İlk kurulumda örnek kategori ve ürünleri ekler.</p></div>`}${themeCard()}${campCard()}${tablesCard()}<div class="card"><h3>Kategoriler</h3>${D.cats.map(c=>`<div class="row"><input data-cn="${c.id}" value="${esc(c.name)}"><button class="btn bad" data-dc="${c.id}">Sil</button></div>`).join("")}<button class="btn alt" data-ac>+ Kategori ekle</button></div>
+ ${D.items.length?"":`<div class="card"><button class="btn" data-seed>Örnek menüyü yükle</button><p class="muted">İlk kurulumda örnek kategori ve ürünleri ekler.</p></div>`}${repCard()}${themeCard()}${campCard()}${tablesCard()}<div class="card"><h3>Kategoriler</h3>${D.cats.map(c=>`<div class="row"><input data-cn="${c.id}" value="${esc(c.name)}"><button class="btn bad" data-dc="${c.id}">Sil</button></div>`).join("")}<button class="btn alt" data-ac>+ Kategori ekle</button></div>
  <h3 style="margin-top:20px">Ürünler</h3>`;
  D.items.forEach(i=>{h+=`<div class="card"><div class="ed">${img(i)}<div><input data-in="${i.id}" value="${esc(i.n)}" aria-label="Ürün adı"><div style="display:flex;gap:8px;margin-top:8px"><input type="number" min="0" data-ip="${i.id}" value="${i.p}" aria-label="Fiyat"><select data-ic="${i.id}">${D.cats.map(c=>`<option value="${c.id}" ${c.id==i.c?"selected":""}>${esc(c.name)}</option>`).join("")}</select></div>
  <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><label class="btn alt" style="margin:0">Fotoğraf<input type="file" accept="image/*" data-if="${i.id}" hidden></label><button class="btn alt" data-so="${i.id}">${i.sold?"Satışa aç":"Tükendi yap"}</button><button class="btn bad" data-di="${i.id}">Sil</button></div></div></div></div>`});
@@ -183,7 +209,7 @@ function yon(){
 function login(t){const u=D.me;return `<div class="wrap" style="text-align:center;padding-top:70px"><h2 style="font-size:36px">${t} girişi</h2><p class="muted">Yalnızca işletmenin yetkili Google hesapları girebilir.</p>${u?`<p style="color:var(--bad)">${esc(u.email)} hesabının bu sayfaya yetkisi yok.</p><button class="btn alt" data-out>Çıkış yap</button>`:`<button class="btn" data-login>Google ile giriş yap</button>`}</div>`}
 
 function draw(){applyTheme();applyBg();navr();const r=route();$("#app").innerHTML=(r=="kasa"?kasa():r=="yonetim"?yon():menu())+(sheet=="cart"?cartSheet():"");window.scrollTo&&0}
-document.addEventListener("click",async e=>{const t=e.target.closest("[data-a],[data-m],[data-tab],[data-go],[data-x],[data-send],[data-done],[data-login],[data-out],[data-so],[data-di],[data-ai],[data-ac],[data-dc],[data-close],[data-pal],[data-seed],[data-mk]");if(!t)return;
+document.addEventListener("click",async e=>{const t=e.target.closest("[data-a],[data-m],[data-tab],[data-go],[data-x],[data-send],[data-act],[data-cancel],[data-edit],[data-clear],[data-at],[data-dt],[data-print],[data-rep],[data-login],[data-out],[data-so],[data-di],[data-ai],[data-ac],[data-dc],[data-close],[data-pal],[data-seed],[data-mk]");if(!t)return;
  const d=t.dataset;if(d.close!==undefined&&e.target!==t)return;
  try{
  if(d.a)cart[d.a]=(cart[d.a]||0)+1;
@@ -192,7 +218,15 @@ document.addEventListener("click",async e=>{const t=e.target.closest("[data-a],[
  else if(d.go)sheet="cart";
  else if(d.x!==undefined||d.close!==undefined){nm=$("#nm")?.value||nm;note=$("#nt")?.value||note;sheet=null}
  else if(d.send!==undefined){await send();return}
- else if(d.done)await updateDoc(doc(db,"orders",d.done),{st:"done",doneAt:serverTimestamp()});
+ else if(d.act){const [id,st]=d.act.split("|"),o=D.orders.find(x=>x.id==id);if(st=="cancelled"&&!confirm("Sipariş iptal edilsin mi?"))return;const u={st};if(st=="done"){u.doneAt=serverTimestamp();u.total=ototal(o)}await updateDoc(doc(db,"orders",id),u)}
+ else if(d.cancel!==undefined){try{await updateDoc(doc(db,"orders",my),{st:"cancelled"})}catch(e){alert("İptal süresi dolmuş olabilir. Lütfen kasaya haber verin.")}}
+ else if(d.edit!==undefined){const o=D.orders.find(x=>x.id==my);try{await updateDoc(doc(db,"orders",my),{st:"cancelled"})}catch(e){alert("Değiştirme süresi dolmuş olabilir. Lütfen kasaya haber verin.");draw();return}
+  cart={};(o.lines||[]).forEach(l=>{if(D.items.some(i=>i.id==l.id&&!i.sold))cart[l.id]=Math.min(99,Math.max(1,Math.floor(+l.q)||1))});note=o.note||"";nm=o.name||"";clearMine();sheet="cart"}
+ else if(d.clear!==undefined)clearMine();
+ else if(d.at!==undefined)await addTable();
+ else if(d.dt){if(confirm("Masa "+d.dt+" silinsin mi? Bu masanın QR kodu çalışmaz olur."))await deleteDoc(doc(db,"tables",d.dt))}
+ else if(d.print!==undefined){window.print();return}
+ else if(d.rep!==undefined){await loadRep();return}
  else if(d.login!==undefined)await signInWithPopup(auth,new GoogleAuthProvider());
  else if(d.out!==undefined)await signOut(auth);
  else if(d.so){const i=D.items.find(x=>x.id==d.so);await updateDoc(doc(db,"items",i.id),{sold:!i.sold})}
@@ -209,6 +243,7 @@ document.addEventListener("change",async e=>{const t=e.target,d=t.dataset,S=o=>s
  try{
  if(d.s)await S({[d.s]:d.s=="self"?t.value=="1":t.value});
  else if(d.cp)await S({camp:{...D.s.camp,[d.cp]:d.cp=="on"?t.value=="1":d.cp=="pct"?Math.min(90,Math.max(0,+t.value||0)):t.value}});
+ else if(d.rd!==undefined)await loadRep();
  else if(d.cn)await updateDoc(doc(db,"categories",d.cn),{name:t.value.slice(0,40)});
  else if(d.in)await updateDoc(doc(db,"items",d.in),{n:t.value.slice(0,60)});
  else if(d.ip)await updateDoc(doc(db,"items",d.ip),{p:Math.max(0,+t.value||0)});
